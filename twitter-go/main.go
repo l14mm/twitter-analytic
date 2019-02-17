@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/dghubble/go-twitter/twitter"
 	"github.com/dghubble/oauth1"
+	"github.com/olivere/elastic"
 )
 
 // Config : config struct for twitter keys
@@ -43,8 +47,39 @@ func main() {
 	token := oauth1.NewToken(configuration.ACCESSTOKENKEY, configuration.ACCESSTOKENSECRET)
 	httpClient := config.Client(oauth1.NoContext, token)
 
+	ctx := context.Background()
+
+	// Elasticsearch client
+	fmt.Println("creating client")
+
+	var esURL = flag.String("url", "http://elasticsearch:9200", "Elasticsearch connection string")
+
+	// Temporary wait for es docker container to start
+	duration := time.Second * 60
+	time.Sleep(duration)
+
+	esclient, err := elastic.NewClient(elastic.SetURL(*esURL))
+	if err != nil {
+		panic(err)
+	}
+
+	log.Printf("Connected to %s", *esURL)
+
+	// Ping the Elasticsearch server to get e.g. the version number
+	info, code, err := esclient.Ping("http://elasticsearch:9200").Do(ctx)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Elasticsearch returned with code %d and version %s\n", code, info.Version.Number)
+
+	// Create an es index
+	_, err = esclient.CreateIndex("tweets").Do(ctx)
+	if err != nil {
+		panic(err)
+	}
+
 	// Twitter client
-	client := twitter.NewClient(httpClient)
+	twitterclient := twitter.NewClient(httpClient)
 	// SwitchDemux used to handle different types of messages (tweets, DMs...)
 	demux := twitter.NewSwitchDemux()
 
@@ -62,7 +97,7 @@ func main() {
 	}
 
 	// Get a sample stream of tweets
-	stream, err := client.Streams.Sample(params)
+	stream, err := twitterclient.Streams.Sample(params)
 
 	// Get demux to handle stream of tweets
 	go demux.HandleChan(stream.Messages)
