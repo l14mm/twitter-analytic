@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -24,6 +25,64 @@ type Config struct {
 	ACCESSTOKENSECRET string `json:"accessTokenSecret"`
 }
 
+// Tweet : struct used for serializing/deserializing data(tweets) in Elasticsearch
+type Tweet struct {
+	User     string                `json:"user"`
+	Message  string                `json:"message"`
+	Retweets int                   `json:"retweets"`
+	Image    string                `json:"image,omitempty"`
+	Created  time.Time             `json:"created,omitempty"`
+	Tags     []string              `json:"tags,omitempty"`
+	Location string                `json:"location,omitempty"`
+	Suggest  *elastic.SuggestField `json:"suggest_field,omitempty"`
+	Country  string                `json:"country,omitempty"`
+	Language string                `json:"language,omitempty"`
+}
+
+// Elasticsearch mapping for tweets
+const mapping = `
+{
+	"settings":{
+		"number_of_shards": 1,
+		"number_of_replicas": 0
+	},
+	"mappings":{
+		"tweet":{
+			"properties":{
+				"user":{
+					"type":"keyword"
+				},
+				"message":{
+					"type":"text",
+					"store": true,
+					"fielddata": true
+				},
+				"image":{
+					"type":"keyword"
+				},
+				"created":{
+					"type":"date"
+				},
+				"tags":{
+					"type":"keyword"
+				},
+				"location":{
+					"type":"geo_point"
+				},
+				"suggest_field":{
+					"type":"completion"
+				},
+				"country":{
+					"type":"text"
+				},
+				"language":{
+					"type":"text"
+				}
+			}
+		}
+	}
+}`
+
 // LoadConfiguration : loads config from json file
 func LoadConfiguration(file string) Config {
 	var config Config
@@ -38,6 +97,26 @@ func LoadConfiguration(file string) Config {
 		fmt.Println("Error opening file", errParse.Error())
 	}
 	return config
+}
+
+func addTweet(ctx context.Context, esclient *elastic.Client, tweet *twitter.Tweet, count int) {
+	coordinates := ""
+	if tweet.Coordinates != nil {
+		// Elasticsearch expects coordinates the other way around to how twitter gives them [lat,lon] -> [lon,lat]
+		coordinates = strconv.FormatFloat(tweet.Coordinates.Coordinates[1], 'f', 6, 64) + ", " + strconv.FormatFloat(tweet.Coordinates.Coordinates[0], 'f', 6, 64)
+	}
+	body := Tweet{User: tweet.User.ScreenName, Message: tweet.Text, Retweets: tweet.RetweetCount, Language: tweet.Lang, Location: coordinates}
+	c := strconv.Itoa(count)
+	_, err := esclient.Index().
+		Index("twitter").
+		Type("tweet").
+		Id(c).
+		BodyJson(body).
+		Do(ctx)
+	if err != nil {
+		panic(err)
+	}
+	// fmt.Printf("Indexed tweet %s to index %s, type %s\n", put.Id, put.Index, put.Type)
 }
 
 func main() {
@@ -67,16 +146,25 @@ func main() {
 	log.Printf("Connected to %s", *esURL)
 
 	// Ping the Elasticsearch server to get e.g. the version number
-	info, code, err := esclient.Ping("http://elasticsearch:9200").Do(ctx)
+	info, code, err := esclient.Ping(*esURL).Do(ctx)
 	if err != nil {
 		panic(err)
 	}
 	fmt.Printf("Elasticsearch returned with code %d and version %s\n", code, info.Version.Number)
 
-	// Create an es index
-	_, err = esclient.CreateIndex("tweets").Do(ctx)
+	// Create an es index, if it doesn't already exist
+	exists, err := esclient.IndexExists("twitter").Do(ctx)
 	if err != nil {
 		panic(err)
+	}
+	if !exists {
+		// Create a new index
+		createIndex, err := esclient.CreateIndex("twitter").BodyString(mapping).Do(ctx)
+		if err != nil {
+			panic(err)
+		}
+		if !createIndex.Acknowledged {
+		}
 	}
 
 	// Twitter client
@@ -88,8 +176,7 @@ func main() {
 
 	// Print tweets received from stream
 	demux.Tweet = func(tweet *twitter.Tweet) {
-		fmt.Println(tweet.Text)
-		fmt.Println("tweet count:", tweetCount)
+		addTweet(ctx, esclient, tweet, tweetCount)
 		tweetCount++
 	}
 

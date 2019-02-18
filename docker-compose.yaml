@@ -35,8 +35,6 @@ services:
       memlock:
         soft: -1
         hard: -1
-    volumes:
-      - ./kibana:/usr/share/kibana/config/kibana
     restart: on-failure
     depends_on:
       - elasticsearch
