@@ -14,7 +14,5 @@ RUN go install
 
 RUN go build -o main .
 
-# CMD ["/app/main"]
-RUN go get github.com/cespare/reflex
-COPY reflex.conf /
-ENTRYPOINT ["reflex", "-c", "/reflex.conf"]
+RUN go get github.com/oxequa/realize
+CMD ["realize", "start"]

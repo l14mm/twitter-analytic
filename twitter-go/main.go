@@ -54,11 +54,12 @@ func main() {
 
 	var esURL = flag.String("url", "http://elasticsearch:9200", "Elasticsearch connection string")
 
-	// Temporary wait for es docker container to start
-	duration := time.Second * 60
+	// TODO: Replace with reconnect on fail
+	// Wait for es docker container to start
+	duration := time.Second * 20
 	time.Sleep(duration)
 
-	esclient, err := elastic.NewClient(elastic.SetURL(*esURL))
+	esclient, err := elastic.NewClient(elastic.SetURL(*esURL), elastic.SetSniff(false))
 	if err != nil {
 		panic(err)
 	}
