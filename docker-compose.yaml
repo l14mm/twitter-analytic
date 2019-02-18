@@ -21,7 +21,26 @@ services:
       - ./esdata:/usr/share/elasticsearch/data
     ports:
       - 9200:9200
-  
+      
+  kibana:
+    image: docker.elastic.co/kibana/kibana:6.6.0
+    container_name: kibana
+    environment:
+      SERVER_NAME: localhost
+      ELASTICSEARCH_URL: http://elasticsearch:9200/
+    ports:
+      - 5601:5601
+    ulimits:
+      nproc: 65535
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - ./kibana:/usr/share/kibana/config/kibana
+    restart: on-failure
+    depends_on:
+      - elasticsearch
+    
   twitter-go:
     build: twitter-go
     container_name: twitter-go
